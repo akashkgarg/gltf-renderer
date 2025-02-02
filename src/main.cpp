@@ -33,6 +33,10 @@
 
 #include "IBL.h"
 
+#define STBI_WRITE_NO_STDIO
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+
 using namespace filament;
 
 static std::ifstream::pos_type getFileSize(const char* filename) {
@@ -225,6 +229,11 @@ void setup(App &app, uint32_t res) {
 
     app.assetLoader = gltfio::AssetLoader::create({ app.engine, app.materials, app.names });
 
+    // set so that pixels untouched by view are fully transparent allowing the
+    // renderer's clear color to show through.
+    app.view->setBlendMode(BlendMode::TRANSLUCENT);
+
+    // enable AO
     app.view->setAmbientOcclusionOptions({ .enabled = true });
 }
 
@@ -249,7 +258,7 @@ void preRender(App &app) {
 
     app.view->setColorGrading(nullptr);
 
-    app.renderer->setClearOptions({ .clearColor = { 1.0, 1.0, 1.0, 1.0 }, .clear = true });
+    // app.renderer->setClearOptions({ .clearColor = { 1.0, 1.0, 1.0, 1.0 }, .clear = true });
 }
 
 struct ScreenshotState {
@@ -284,12 +293,21 @@ void exportScreenshot(View* view, Renderer* renderer, std::string filename) {
 
             // ReadPixels on Metal only supports RGBA, but the PPM format only supports RGB.
             // So, manually perform a quick transformation here.
-            convertRGBAtoRGB(buffer, vp.width, vp.height);
+            // convertRGBAtoRGB(buffer, vp.width, vp.height);
 
             utils::Path out(state->filename);
-            std::ofstream ppmStream(out);
-            ppmStream << "P6 " << vp.width << " " << vp.height << " " << 255 << std::endl;
-            ppmStream.write(static_cast<char*>(buffer), vp.width * vp.height * 3);
+            // std::ofstream ppmStream(out);
+            // ppmStream << "P6 " << vp.width << " " << vp.height << " " << 255 << std::endl;
+            // ppmStream.write(static_cast<char*>(buffer), vp.width * vp.height * 3);
+            // stbi_write_image_png(state->filename, vp.width, vp.height, 4, static_cast<char*>(buffer));
+            int len;
+            auto png = stbi_write_png_to_mem(static_cast<unsigned char*>(buffer), 0, vp.width, vp.height, 4, &len);
+            if (png == NULL) {
+                std::cerr << "Could not write image to png mem" << std::endl;
+            }
+            std::ofstream png_stream(out);
+            png_stream.write(reinterpret_cast<char*>(png), len);
+            STBIW_FREE(png);
             delete[] static_cast<uint8_t*>(buffer);
             delete state;
         },
@@ -319,7 +337,7 @@ void render(App &app) {
         app.camera->lookAt(normalize(vdir) * 2.0, {0, 0, 0}, {0, 1, 0});
 
         std::stringstream filename;
-        filename << "render0" << i << ".ppm";
+        filename << "render0" << i << ".png";
 
         std::cout << "rendering " << filename.str() << std::endl;
 
