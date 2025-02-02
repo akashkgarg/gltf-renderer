@@ -176,7 +176,7 @@ void loadIBL(App &app, const std::string &path) {
 
     if (app.ibl != nullptr) {
         //app.ibl->getSkybox()->setLayerMask(0x7, 0x4);
-        app.scene->setSkybox(app.ibl->getSkybox());
+        // app.scene->setSkybox(app.ibl->getSkybox());
         app.scene->setIndirectLight(app.ibl->getIndirectLight());
     }
 }
@@ -224,6 +224,8 @@ void setup(App &app, uint32_t res) {
     app.materials = gltfio::createUbershaderProvider(engine, UBERARCHIVE_DEFAULT_DATA, UBERARCHIVE_DEFAULT_SIZE);
 
     app.assetLoader = gltfio::AssetLoader::create({ app.engine, app.materials, app.names });
+
+    app.view->setAmbientOcclusionOptions({ .enabled = true });
 }
 
 void preRender(App &app) {
@@ -246,6 +248,8 @@ void preRender(App &app) {
     tcm.setParent(tcm.getInstance(app.asset->getRoot()), root);
 
     app.view->setColorGrading(nullptr);
+
+    app.renderer->setClearOptions({ .clearColor = { 1.0, 1.0, 1.0, 1.0 }, .clear = true });
 }
 
 struct ScreenshotState {
@@ -298,11 +302,39 @@ void exportScreenshot(View* view, Renderer* renderer, std::string filename) {
 }
 
 void render(App &app) {
-    if (app.renderer->beginFrame(app.swap_chain)) {
-        app.renderer->render(app.view);
-        exportScreenshot(app.view, app.renderer, "render.ppm");
-        app.renderer->endFrame();
+    using namespace filament::math;
+    std::array<float3, 9> views = { 
+        float3(0, 0, 1),
+        float3(0, 1, 0),
+        float3(1, 0, 0),
+        float3(0, 0, -1),
+        float3(0, -1, 0),
+        float3(-1, 0, 0),
+        float3(1, 1, 1),
+        float3(1, -1, 1),
+        float3(1, 1, -1) };
+
+    int i = 0;
+    for (auto vdir : views)  {
+        app.camera->lookAt(normalize(vdir) * 2.0, {0, 0, 0}, {0, 1, 0});
+
+        std::stringstream filename;
+        filename << "render0" << i << ".ppm";
+
+        std::cout << "rendering " << filename.str() << std::endl;
+
+        bool rendered = false;
+        do {
+            if (app.renderer->beginFrame(app.swap_chain)) {
+                app.renderer->render(app.view);
+                exportScreenshot(app.view, app.renderer, filename.str());
+                app.renderer->endFrame();
+                rendered = true;
+            }
+        } while (!rendered);
+        ++i;
     }
+    
 }
 
 void cleanup(App &app) {
@@ -326,7 +358,7 @@ math::mat4f fitIntoUnitCube(const Aabb& bounds, float zoffset) {
     float maxExtent;
     maxExtent = std::max(maxpt.x - minpt.x, maxpt.y - minpt.y);
     maxExtent = std::max(maxExtent, maxpt.z - minpt.z);
-    float scaleFactor = 2.0f / maxExtent;
+    float scaleFactor = 1.0f / maxExtent;
     float3 center = (minpt + maxpt) / 2.0f;
     center.z += zoffset / scaleFactor;
     return mat4f::scaling(float3(scaleFactor)) * mat4f::translation(-center);
@@ -334,7 +366,7 @@ math::mat4f fitIntoUnitCube(const Aabb& bounds, float zoffset) {
 
 void setupCamera(App &app) {
     Aabb aabb = app.asset->getBoundingBox();
-    auto transform = fitIntoUnitCube(aabb, 4);
+    auto transform = fitIntoUnitCube(aabb, 0);
     aabb = aabb.transform(transform);
 
     std::cout << transform << std::endl;
@@ -350,9 +382,11 @@ int main(int argc, char **argv) {
 
     App app;
 
-    utils::Path filename("./assets/FlightHelmet/FlightHelmet.gltf");
+    // utils::Path filename("./assets/FlightHelmet/FlightHelmet.gltf");
+    // utils::Path filename("/Users/akashgarg/scripts/LB_Reed_Diffuser.glb");
+    utils::Path filename(argv[1]);
 
-    setup(app, 512);
+    setup(app, 256);
     loadIBL(app, "assets/lightroom_14b.hdr");
     loadAsset(app, filename);
 
