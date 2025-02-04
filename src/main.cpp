@@ -22,6 +22,7 @@
 #include <filament/Viewport.h>
 
 #include <math/mat4.h>
+#include <math/mat3.h>
 #include <math/vec3.h>
 #include <mathio/ostream.h>
 
@@ -30,6 +31,10 @@
 #include <utils/NameComponentManager.h>
 #include <utils/Entity.h>
 #include <utils/Slice.h>
+
+#include <chrono>
+#include <ctime>
+#include <thread>
 
 #include "IBL.h"
 
@@ -238,9 +243,11 @@ void setup(App &app, uint32_t res) {
 }
 
 void preRender(App &app) {
+    using namespace filament::math;
+
     auto& rcm = app.engine->getRenderableManager();
 
-    app.camera->setLensProjection(28.0, 1.0, 0.1, 100.0);
+    app.camera->setLensProjection(40.0, 1.0, 0.1, 100.0);
 
     app.view->setCamera(app.camera);
 
@@ -258,7 +265,7 @@ void preRender(App &app) {
 
     app.view->setColorGrading(nullptr);
 
-    // app.renderer->setClearOptions({ .clearColor = { 1.0, 1.0, 1.0, 1.0 }, .clear = true });
+    app.renderer->setClearOptions({ .clearColor = { 1.0, 1.0, 1.0, 0.0 }, .clear = true });
 }
 
 struct ScreenshotState {
@@ -322,19 +329,20 @@ void exportScreenshot(View* view, Renderer* renderer, std::string filename) {
 void render(App &app) {
     using namespace filament::math;
     std::array<float3, 9> views = { 
-        float3(0, 0, 1),
-        float3(0, 1, 0),
-        float3(1, 0, 0),
-        float3(0, 0, -1),
         float3(0, -1, 0),
+        float3(1, 0, 0),
+        float3(0, 1, 0),
         float3(-1, 0, 0),
-        float3(1, 1, 1),
         float3(1, -1, 1),
-        float3(1, 1, -1) };
+        float3(1, 1, 1),
+        float3(-1, 1, 1),
+        float3(-1, -1, 1),
+        float3(0, 0, 1) };
 
     int i = 0;
     for (auto vdir : views)  {
-        app.camera->lookAt(normalize(vdir) * 2.0, {0, 0, 0}, {0, 1, 0});
+        // z-up since we match blender where z is up.
+        app.camera->lookAt(normalize(vdir) * 2.0, {0, 0, 0}, {0, 0, 1});
 
         std::stringstream filename;
         filename << "render0" << i << ".png";
@@ -344,10 +352,15 @@ void render(App &app) {
         bool rendered = false;
         do {
             if (app.renderer->beginFrame(app.swap_chain)) {
+                auto start = std::chrono::high_resolution_clock::now();
                 app.renderer->render(app.view);
                 exportScreenshot(app.view, app.renderer, filename.str());
                 app.renderer->endFrame();
                 rendered = true;
+                auto stop = std::chrono::high_resolution_clock::now();
+                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+                std::cout << "Render time (ms): " << duration.count() << std::endl;
+                std::this_thread::sleep_for(std::chrono::milliseconds(16));
             }
         } while (!rendered);
         ++i;
@@ -376,6 +389,7 @@ math::mat4f fitIntoUnitCube(const Aabb& bounds, float zoffset) {
     float maxExtent;
     maxExtent = std::max(maxpt.x - minpt.x, maxpt.y - minpt.y);
     maxExtent = std::max(maxExtent, maxpt.z - minpt.z);
+    std::cout << "max extent: " << maxExtent << std::endl;
     float scaleFactor = 1.0f / maxExtent;
     float3 center = (minpt + maxpt) / 2.0f;
     center.z += zoffset / scaleFactor;
@@ -383,6 +397,7 @@ math::mat4f fitIntoUnitCube(const Aabb& bounds, float zoffset) {
 }
 
 void setupCamera(App &app) {
+    using namespace filament::math;
     Aabb aabb = app.asset->getBoundingBox();
     auto transform = fitIntoUnitCube(aabb, 0);
     aabb = aabb.transform(transform);
@@ -391,6 +406,14 @@ void setupCamera(App &app) {
 
     auto root = app.asset->getRoot();
     auto &tcm = app.engine->getTransformManager();
+
+    // convert from y-up to z-up to match blender.
+    mat3f rot(float3(1, 0, 0), float3(0, 0, -1), float3(0, 1, 0));
+    rot = transpose(rot);
+    mat4f coord_xform(rot);
+    std::cout << "rotation " << coord_xform << std::endl;
+    transform = coord_xform * transform;
+
     tcm.setTransform(tcm.getInstance(root), transform);
 
     app.camera->lookAt({4, 0, -4}, {0, 0, -4}, {0, 1, 0});
@@ -404,7 +427,7 @@ int main(int argc, char **argv) {
     // utils::Path filename("/Users/akashgarg/scripts/LB_Reed_Diffuser.glb");
     utils::Path filename(argv[1]);
 
-    setup(app, 256);
+    setup(app, 512);
     loadIBL(app, "assets/lightroom_14b.hdr");
     loadAsset(app, filename);
 
