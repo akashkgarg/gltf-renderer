@@ -44,6 +44,8 @@
 
 using namespace filament;
 
+int gFileIdx = 0;
+
 static std::ifstream::pos_type getFileSize(const char* filename) {
     std::ifstream in(filename, std::ifstream::ate | std::ifstream::binary);
     return in.tellg();
@@ -80,6 +82,9 @@ struct App {
 
 void loadAsset(App &app, const utils::Path &filename) {
     // Peek at the file size to allow pre-allocation.
+    app.names = new utils::NameComponentManager(utils::EntityManager::get());
+    app.assetLoader = gltfio::AssetLoader::create({ app.engine, app.materials, app.names });
+
     long const contentSize = static_cast<long>(getFileSize(filename.c_str()));
     if (contentSize <= 0) {
         std::cerr << "Unable to open " << filename << std::endl;
@@ -203,8 +208,6 @@ void setup(App &app, uint32_t res) {
     }
     app.engine = engine;
 
-    app.names = new utils::NameComponentManager(utils::EntityManager::get());
-      
     auto swap_chain = engine->createSwapChain(res, res, 0);
     if (!swap_chain) {
         std::cerr << "Could not get swapchain" << std::endl;
@@ -232,8 +235,6 @@ void setup(App &app, uint32_t res) {
 
     app.materials = gltfio::createUbershaderProvider(engine, UBERARCHIVE_DEFAULT_DATA, UBERARCHIVE_DEFAULT_SIZE);
 
-    app.assetLoader = gltfio::AssetLoader::create({ app.engine, app.materials, app.names });
-
     // set so that pixels untouched by view are fully transparent allowing the
     // renderer's clear color to show through.
     app.view->setBlendMode(BlendMode::TRANSLUCENT);
@@ -257,7 +258,6 @@ void preRender(App &app) {
     double const aspectRatio = (double) vp.width / vp.height;
     app.camera->setScaling({1.0 / aspectRatio, 1.0});
 
-    // technically we don't need to do this each frame
     auto& tcm = app.engine->getTransformManager();
     TransformManager::Instance const& root = tcm.getInstance(app.rootTransformEntity);
     tcm.setParent(tcm.getInstance(app.cam_entity), root);
@@ -360,11 +360,11 @@ void render(App &app) {
     int i = 0;
     for (auto vdir : views)  {
         // z-up since we match blender where z is up.
-        float3 up = norm(vdir - float3(0, 0, 1)) < 1.e-6 ? float3(0, 1, 0) : float3(0, 0, 1);
+        float3 up = norm(vdir - float3(0, 0, 1)) < 1.e-6 ? float3(0, -1, 0) : float3(0, 0, 1);
         app.camera->lookAt(normalize(vdir) * 2.0, {0, 0, 0}, up);
 
         std::stringstream filename;
-        filename << "render0" << i << ".png";
+        filename << gFileIdx << "-render0" << i << ".png";
         std::cout << "rendering " << filename.str() << std::endl;
 
         auto tic = std::chrono::high_resolution_clock::now();
@@ -374,21 +374,22 @@ void render(App &app) {
         std::cout << "Render + Image write time (ms): " << duration.count() << std::endl;
         ++i;
     }
-    
+
+    ++gFileIdx;
 }
 
 void cleanup(App &app) {
     app.assetLoader->destroyAsset(app.asset);
-    app.materials->destroyMaterials();
+    // app.materials->destroyMaterials();
 
-    delete app.materials;
+    // delete app.materials;
     delete app.names;
 
     gltfio::AssetLoader::destroy(&app.assetLoader);
 
-    app.ibl.reset();
-    app.engine->destroy(app.scene);
-    Engine::destroy(app.engine);
+    // app.ibl.reset();
+    // app.engine->destroy(app.scene);
+    // Engine::destroy(app.engine);
 }
 
 math::mat4f fitIntoUnitCube(const Aabb& bounds, float zoffset) {
@@ -399,10 +400,13 @@ math::mat4f fitIntoUnitCube(const Aabb& bounds, float zoffset) {
     maxExtent = std::max(maxpt.x - minpt.x, maxpt.y - minpt.y);
     maxExtent = std::max(maxExtent, maxpt.z - minpt.z);
     std::cout << "max extent: " << maxExtent << std::endl;
-    float scaleFactor = 1.0f / maxExtent;
-    float3 center = (minpt + maxpt) / 2.0f;
-    center.z += zoffset / scaleFactor;
-    return mat4f::scaling(float3(scaleFactor)) * mat4f::translation(-center);
+    if (maxExtent != 0) {
+        float scaleFactor = 1.0f / maxExtent;
+        float3 center = (minpt + maxpt) / 2.0f;
+        center.z += zoffset / scaleFactor;
+        return mat4f::scaling(float3(scaleFactor)) * mat4f::translation(-center);
+    }
+    return mat4f();
 }
 
 void setupCamera(App &app) {
@@ -432,22 +436,24 @@ int main(int argc, char **argv) {
 
     App app;
 
-    // utils::Path filename("./assets/FlightHelmet/FlightHelmet.gltf");
-    // utils::Path filename("/Users/akashgarg/scripts/LB_Reed_Diffuser.glb");
-    utils::Path filename(argv[1]);
-
     setup(app, 512);
 
-    auto tic = std::chrono::high_resolution_clock::now();
     loadIBL(app, "assets/lightroom_14b.hdr");
-    loadAsset(app, filename);
-    auto toc = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(toc - tic);
-    std::cout << "Load glTF time (ms): " << duration.count() << std::endl;
 
-    setupCamera(app);
-
-    preRender(app);
-    render(app);
-    cleanup(app);
+    // utils::Path filename("./assets/FlightHelmet/FlightHelmet.gltf");
+    // utils::Path filename("/Users/akashgarg/scripts/LB_Reed_Diffuser.glb");
+    std::cout << "processing " << argc - 1 << " files." << std::endl;
+    for (int i = 1; i < argc; ++i) {
+        std::cout << "rendering " << argv[i] << std::endl;
+        utils::Path filename(argv[i]);
+        auto tic = std::chrono::high_resolution_clock::now();
+        loadAsset(app, filename);
+        auto toc = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(toc - tic);
+        std::cout << "Load glTF time (ms): " << duration.count() << std::endl;
+        setupCamera(app);
+        preRender(app);
+        render(app);
+        cleanup(app);
+    }
 }
