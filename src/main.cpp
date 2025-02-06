@@ -437,8 +437,13 @@ int main(int argc, char **argv) {
     utils::Path filename(argv[1]);
 
     setup(app, 512);
+
+    auto tic = std::chrono::high_resolution_clock::now();
     loadIBL(app, "assets/lightroom_14b.hdr");
     loadAsset(app, filename);
+    auto toc = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(toc - tic);
+    std::cout << "Load glTF time (ms): " << duration.count() << std::endl;
 
     setupCamera(app);
 
