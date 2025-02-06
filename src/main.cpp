@@ -271,6 +271,7 @@ void preRender(App &app) {
 struct ScreenshotState {
     View* view;
     std::string filename;
+    bool done;
 };
 
 static void convertRGBAtoRGB(void* buffer, uint32_t width, uint32_t height) {
@@ -285,9 +286,13 @@ static void convertRGBAtoRGB(void* buffer, uint32_t width, uint32_t height) {
     }
 }
 
-void exportScreenshot(View* view, Renderer* renderer, std::string filename) {
+void renderToFile(App &app, std::string filename) {
+    auto view = app.view;
+    auto renderer = app.renderer;
     const Viewport& vp = view->getViewport();
     const size_t byteCount = vp.width * vp.height * 4;
+
+    ScreenshotState state{ .view = view, .filename = filename, .done = false };
 
     // Create a buffer descriptor that writes the PPM after the data becomes ready on the CPU.
     backend::PixelBufferDescriptor buffer(
@@ -316,14 +321,27 @@ void exportScreenshot(View* view, Renderer* renderer, std::string filename) {
             png_stream.write(reinterpret_cast<char*>(png), len);
             STBIW_FREE(png);
             delete[] static_cast<uint8_t*>(buffer);
-            delete state;
+            state->done = true;
         },
-        new ScreenshotState { view, filename }
+        &state
     );
 
+    while (!app.renderer->beginFrame(app.swap_chain))
+        ;
+    app.renderer->render(app.view);
     // Invoke readPixels asynchronously.
     renderer->readPixels((uint32_t) vp.left, (uint32_t) vp.bottom, vp.width, vp.height,
             std::move(buffer));
+    app.renderer->endFrame();
+
+    // filament expects to fill the command stream while waiting for CPU actions
+    // to complete.
+    while (!state.done) {
+        if (app.renderer->beginFrame(app.swap_chain)) {
+            app.renderer->render(app.view);
+            app.renderer->endFrame();
+        }
+    }
 }
 
 void render(App &app) {
@@ -342,27 +360,18 @@ void render(App &app) {
     int i = 0;
     for (auto vdir : views)  {
         // z-up since we match blender where z is up.
-        app.camera->lookAt(normalize(vdir) * 2.0, {0, 0, 0}, {0, 0, 1});
+        float3 up = norm(vdir - float3(0, 0, 1)) < 1.e-6 ? float3(0, 1, 0) : float3(0, 0, 1);
+        app.camera->lookAt(normalize(vdir) * 2.0, {0, 0, 0}, up);
 
         std::stringstream filename;
         filename << "render0" << i << ".png";
-
         std::cout << "rendering " << filename.str() << std::endl;
 
-        bool rendered = false;
-        do {
-            if (app.renderer->beginFrame(app.swap_chain)) {
-                auto start = std::chrono::high_resolution_clock::now();
-                app.renderer->render(app.view);
-                exportScreenshot(app.view, app.renderer, filename.str());
-                app.renderer->endFrame();
-                rendered = true;
-                auto stop = std::chrono::high_resolution_clock::now();
-                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
-                std::cout << "Render time (ms): " << duration.count() << std::endl;
-                std::this_thread::sleep_for(std::chrono::milliseconds(16));
-            }
-        } while (!rendered);
+        auto tic = std::chrono::high_resolution_clock::now();
+        renderToFile(app, filename.str());
+        auto toc = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(toc - tic);
+        std::cout << "Render + Image write time (ms): " << duration.count() << std::endl;
         ++i;
     }
     
