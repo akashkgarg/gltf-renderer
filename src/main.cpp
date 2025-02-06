@@ -407,7 +407,8 @@ math::mat4f fitIntoUnitCube(const Aabb& bounds, float zoffset) {
 
 void setupCamera(App &app) {
     using namespace filament::math;
-    Aabb aabb = app.asset->getBoundingBox();
+    app.instance->recomputeBoundingBoxes();
+    Aabb aabb = app.instance->getBoundingBox();
     auto transform = fitIntoUnitCube(aabb, 0);
     aabb = aabb.transform(transform);
 
