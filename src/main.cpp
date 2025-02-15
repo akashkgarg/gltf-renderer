@@ -364,15 +364,26 @@ void render(App &app) {
         app.camera->lookAt(normalize(vdir) * 2.0, {0, 0, 0}, up);
 
         std::stringstream filename;
-        filename << "render0" << i << ".png";
+        filename << gFileIdx << "-render0" << i << ".png";
         std::cout << "rendering " << filename.str() << std::endl;
 
-        auto tic = std::chrono::high_resolution_clock::now();
-        renderToFile(app, filename.str());
-        auto toc = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(toc - tic);
-        std::cout << "Render + Image write time (ms): " << duration.count() << std::endl;
-        ++i;
+            auto tic = std::chrono::high_resolution_clock::now();
+            renderToFile(app, filename.str());
+            auto toc = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(toc - tic);
+            std::cout << "Render + Image write time (ms): " << duration.count() << std::endl;
+
+            tic = std::chrono::high_resolution_clock::now();
+            while (!app.renderer->beginFrame(app.swap_chain))
+                ;
+            app.renderer->render(app.view);
+            app.renderer->endFrame();
+            toc = std::chrono::high_resolution_clock::now();
+            duration = std::chrono::duration_cast<std::chrono::milliseconds>(toc - tic);
+            std::cout << "Render time (ms): " << duration.count() << std::endl;
+
+            ++i;
+        }
     }
     
 }

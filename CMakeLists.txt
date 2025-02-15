@@ -14,9 +14,12 @@ set(CMAKE_PREFIX_PATH "${CMAKE_CURRENT_SOURCE_DIR}" ${CMAKE_PREFIX_PATH})
 # add common cmake file
 include (common)
 include (TargetOS)
-include (filament)
 
-set(CMAKE_CXX_STANDARD 20)
+if (TARGET_OS_MACOS)
+include (filament)
+endif()
+
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ${CMAKE_CXX_STANDARD})
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -24,6 +27,11 @@ set(CMAKE_COMPILE_WARNING_AS_ERROR ON)
 
 # Packages
 #------------------------------------------------------------------------------ 
+
+if (TARGET_OS_LINUX)
+  set(CMAKE_CXX_FLAGS "-pthread -fPIC -m64 -stdlib=libc++")
+  set(filament_SOURCE_DIR /home/jovyan/data/akash/filament-1.56.7/out/release/filament)
+endif()
 
 include_directories(src
   SYSTEM ${filament_SOURCE_DIR}/include)
@@ -56,34 +64,41 @@ set(FRAMEWORKS
     "-framework QuartzCore")
 endif()
 
+if (TARGET_OS_LINUX)
+set(LINUX_LIBS
+  dl
+  c++
+  c++abi)
+endif()
+
 # do we need all of these?
 set(FILAMENT_LIBS
-  meshoptimizer
-  geometry
-  basis_transcoder
-  ibl
-  backend
-  bluegl
-  filamat
-  filament
-  filament-iblprefilter
-  filameshio
-  filabridge
-  filaflat
-  bluevk
-  dracodec
-  smol-v
-  gltfio_core
-  gltfio
   utils
-  image
+  filament 
+  backend 
+  meshoptimizer
+  mikktspace
+  geometry 
+  bluevk 
+  bluegl
+  filabridge 
+  filaflat 
+  smol-v 
+  filament-iblprefilter
   ktxreader
-  uberarchive
+  ibl
+  image
   zstd
-  uberzlib)
+  gltfio
+  gltfio_core
+  uberarchive
+  uberzlib
+  dracodec
+  basis_transcoder
+)
 
 add_executable(${PROJECT_NAME} ${Sources} ${NativeSources})
-target_link_libraries(${PROJECT_NAME} ${FILAMENT_LIBS} ${FRAMEWORKS})
+target_link_libraries(${PROJECT_NAME} ${LINUX_LIBS} ${FILAMENT_LIBS} ${FILAMENT_LIBS})
 
 # make sure we can access assets from build dir
 execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink
